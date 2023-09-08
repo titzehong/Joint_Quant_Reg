@@ -619,7 +619,8 @@ def grid_search_deriv_approx_vector(y_i:float,
         if top_diff == 0:
             top_diff = 1e-20
         """
-        top_diff = 0.009990000000000054
+        #top_diff = 0.009990000000000054
+        top_diff = 0.1
         deriv_Q_y = (top_diff)/(tau_edge - tau_grid[t_l-1])
     
     
