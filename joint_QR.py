@@ -213,19 +213,19 @@ def logistic_transform(tau_input: float,
 
 @numba.njit
 def logistic_transform_vector(tau_input: Union[float, np.ndarray],
-                       tau_grid: np.ndarray,
+                       tau_grid_expanded: np.ndarray,
                        c_vals_i: np.ndarray):
     
     # Calc grid distance
-    trapz_len = tau_grid[1] - tau_grid[0]
+    trapz_len = tau_grid_expanded[1] - tau_grid_expanded[0]
     
     # Calc normalizing constant
-    norm_const = calc_grid_trapezoidal(tau_grid,
+    norm_const = calc_grid_trapezoidal(tau_grid_expanded,
                                        c_vals_i,
-                                       len(tau_grid)-1)
+                                       len(tau_grid_expanded)-1)
     
     # Get position where tau input falls on grid
-    t_ls = get_interval_vector(tau_input, tau_grid).astype('int')
+    t_ls = get_interval_vector(tau_input, tau_grid_expanded).astype('int')
     t_ls_1 = t_ls-1
     
     """
@@ -242,14 +242,18 @@ def logistic_transform_vector(tau_input: Union[float, np.ndarray],
     c_samp_repeat = np.repeat(c_vals_i,len(tau_input)).reshape((len(c_vals_i), 
                                                     len(tau_input))).T
     
-    e_t_l = calc_grid_trapezoidal_vector(tau_grid, c_vals_i, c_samp_repeat, t_ls) / norm_const
+    e_t_l = calc_grid_trapezoidal_vector(tau_grid_expanded, c_vals_i, c_samp_repeat, t_ls) / norm_const
 
     if len(t_ls) == 1:
         if t_ls[0] == 0:
             diff = e_t_l / 2
             return e_t_l-diff # Specific edge case when tau input is at left boundary 
-    
-    e_t_l_1 = calc_grid_trapezoidal_vector(tau_grid, c_vals_i, c_samp_repeat, t_ls_1) / norm_const
+
+    e_t_l_1 = np.zeros(len(e_t_l)) 
+    e_t_l_1[1:-1] =  e_t_l[0:len(e_t_l)-2]
+    #e_t_l_1 = np.concatenate([np.array([0.0]),e_t_l[0:len(e_t_l)-1]])
+
+    #e_t_l_1 = calc_grid_trapezoidal_vector(tau_grid_expanded, c_vals_i, c_samp_repeat, t_ls_1) / norm_const
 
     """
     e_tau_hat = (e_t_l*(tau_input - tau_grid[t_ls_1]) + \
@@ -257,10 +261,10 @@ def logistic_transform_vector(tau_input: Union[float, np.ndarray],
                 (tau_input-tau_grid[t_ls_1])*(tau_grid[t_ls]-tau_input)*(c_vals_i[t_ls]-c_vals_i[t_ls_1])) / \
                 (tau_grid[t_ls] - tau_grid[t_ls_1])
     """
-    e_tau_hat = (e_t_l*(tau_input - tau_grid[t_ls_1]) + \
-                e_t_l_1*(tau_grid[t_ls]-tau_input) - \
-                (tau_input-tau_grid[t_ls_1])*(tau_grid[t_ls]-tau_input)*(e_t_l-e_t_l_1)) / \
-                (tau_grid[t_ls] - tau_grid[t_ls_1])
+    e_tau_hat = (e_t_l*(tau_input - tau_grid_expanded[t_ls_1]) + \
+                e_t_l_1*(tau_grid_expanded[t_ls]-tau_input) - \
+                (tau_input-tau_grid_expanded[t_ls_1])*(tau_grid_expanded[t_ls]-tau_input)*(e_t_l-e_t_l_1)) / \
+                (tau_grid_expanded[t_ls] - tau_grid_expanded[t_ls_1])
     
     return e_tau_hat
 
@@ -560,6 +564,7 @@ def grid_search_deriv_approx_vector(y_i:float,
                              sigma_1: float,
                              sigma_2: float,
                              tau_grid: np.ndarray,
+                             tau_grid_expanded: np.ndarray,
                              mu: float,
                              gamma: float,
                              base_quantile_mean: float,
@@ -575,7 +580,7 @@ def grid_search_deriv_approx_vector(y_i:float,
                                               w_samples_2=w_samples_2,
                                               sigma_1=sigma_1,
                                               sigma_2=sigma_2,
-                                              tau_grid=tau_grid,
+                                              tau_grid=tau_grid_expanded,
                                               mu=mu,
                                               gamma=gamma,
                                               base_quantile_mean=base_quantile_mean,
@@ -595,44 +600,49 @@ def grid_search_deriv_approx_vector(y_i:float,
 
     if t_l >= len(tau_grid)-1:
         tau_edge = 0.99999
-
+        """
         Q_y_edge = Q_joint_quantile_function_vector(tau_input=np.array([tau_edge]),
-                                              x_vals=x_i,
-                                              w_samples_1=w_samples_1,
-                                              w_samples_2=w_samples_2,
-                                              sigma_1=sigma_1,
-                                              sigma_2=sigma_2,
-                                              tau_grid=tau_grid,
-                                              mu=mu,
-                                              gamma=gamma,
-                                              base_quantile_mean=base_quantile_mean,
-                                              base_quantile_sd=base_quantile_sd,
-                                              base_quantile_v=base_quantile_v,
-                                              base_quantile_dist=base_quantile_dist) 
+                                            x_vals=x_i,
+                                            w_samples_1=w_samples_1,
+                                            w_samples_2=w_samples_2,
+                                            sigma_1=sigma_1,
+                                            sigma_2=sigma_2,
+                                            tau_grid=tau_grid_expanded,
+                                            mu=mu,
+                                            gamma=gamma,
+                                            base_quantile_mean=base_quantile_mean,
+                                            base_quantile_sd=base_quantile_sd,
+                                            base_quantile_v=base_quantile_v,
+                                            base_quantile_dist=base_quantile_dist) 
 
         top_diff = Q_y_edge[0] - Q_y_i_vals[-2]
         if top_diff == 0:
             top_diff = 1e-20
+        """
+        top_diff = 0.009990000000000054
         deriv_Q_y = (top_diff)/(tau_edge - tau_grid[t_l-1])
     
     
     elif t_l == 0:
         tau_edge = 0.005
+        """
         Q_y_edge = Q_joint_quantile_function_vector(tau_input=np.array([tau_edge]),
-                                      x_vals=x_i,
-                                      w_samples_1=w_samples_1,
-                                      w_samples_2=w_samples_2,
-                                      sigma_1=sigma_1,
-                                      sigma_2=sigma_2,
-                                      tau_grid=tau_grid,
-                                      mu=mu,
-                                      gamma=gamma,
-                                      base_quantile_mean=base_quantile_mean,
-                                      base_quantile_sd=base_quantile_sd,
-                                      base_quantile_v=base_quantile_v,
-                                      base_quantile_dist=base_quantile_dist) 
+                                    x_vals=x_i,
+                                    w_samples_1=w_samples_1,
+                                    w_samples_2=w_samples_2,
+                                    sigma_1=sigma_1,
+                                    sigma_2=sigma_2,
+                                    tau_grid=tau_grid_expanded,
+                                    mu=mu,
+                                    gamma=gamma,
+                                    base_quantile_mean=base_quantile_mean,
+                                    base_quantile_sd=base_quantile_sd,
+                                    base_quantile_v=base_quantile_v,
+                                    base_quantile_dist=base_quantile_dist) 
         
-        deriv_Q_y = (Q_y_i_vals[t_l] - Q_y_edge[0])/(tau_grid[t_l] - tau_edge)
+        """
+        bot_diff = 0.05
+        deriv_Q_y = (bot_diff)/(tau_grid[t_l] - tau_edge)
         #print(tau_grid[t_l])
     
     else:
@@ -654,6 +664,7 @@ def eval_ll(y_vals_true,
           sigma_1,
           sigma_2,
           tau_grid,
+          tau_grid_expanded,
           mu,
           gamma,
           base_quantile_mean=0.0,
@@ -675,6 +686,7 @@ def eval_ll(y_vals_true,
                               sigma_1=sigma_1,
                               sigma_2=sigma_2,
                               tau_grid=tau_grid,
+                              tau_grid_expanded=tau_grid_expanded,
                               mu=mu,
                               gamma=gamma,
                               base_quantile_mean=base_quantile_mean,
@@ -1212,3 +1224,20 @@ def generate_beta_samples(tau_input: float,
         beta_1_store.append(beta_1_samp)
         
         return beta_0_store, beta_1_store
+    
+
+def logpdf_mvn(x, mean, cov):
+    """
+    Compute the loglikelihood of a multivariate normal distribution (MND).
+    
+    Parameters:
+    x (numpy array): A 1-D numpy array of data points.
+    mean (numpy array): A 1-D numpy array representing the mean vector of the MND.
+    cov (numpy array): A 2-D numpy array representing the covariance matrix of the MND.
+    
+    Returns:
+    float: The loglikelihood of the MND.
+    """
+    n = x.shape[0]
+    diff = x - mean
+    return -0.5 * (n * np.log(2 * np.pi) + np.log(np.linalg.det(cov)) + diff.T @ np.linalg.inv(cov) @ diff)
