@@ -179,9 +179,13 @@ def get_interval_vector(tau_in: Union[float, np.ndarray],
     
     #tau_max = len(taus)
     #out_mat = np.empty_like(tau_in,dtype='int')
+    """
     trapz_len = taus[1] - taus[0]
     out_mat = np.ceil((tau_in - taus[0]) / trapz_len)
     out_mat = out_mat.astype(np.int32)
+    """
+
+    out_mat = np.searchsorted(taus, tau_in) 
     
     return out_mat
 
@@ -458,7 +462,7 @@ def calc_knot_approx(tau_in,
 
      # vector
     cov_input_knots = covariance_function_single_var_vector(knot_points,
-                                            tau_in,
+                                          tau_in,
                                             kappa,
                                             rho,
                                             lambd)
@@ -498,7 +502,7 @@ def calc_knot_approx_v2(tau_in,
                                             kappa,
                                             rho,
                                             lambd,
-                                            with_kappa=False)
+                                            with_kappa=with_kappa)
     
     
     f_w_approx = w_knot_points @ np.linalg.inv(cov_mat_knots) @ cov_input_knots
@@ -553,6 +557,12 @@ def eta_function_i_vector(tau_input: np.ndarray,
 
     if dist == 'norm':
         eta_out = sigma * numba_norm.ppf(xi_vals,
+                                     mean,
+                                     sd)
+        
+    elif dist == 't':
+        eta_out = sigma * numba_t.ppf(xi_vals,
+                                      v,
                                      mean,
                                      sd)
     
@@ -659,7 +669,7 @@ def grid_search_deriv_approx_vector(y_i:float,
                                             base_quantile_dist=base_quantile_dist) 
 
         if y_i > Q_y_edge[0]: # If still outside boundary
-            top_diff = 10 # Set to arbitrary big number
+            top_diff = 1e99 # Set to arbitrary big number
         
         else:
             top_diff = Q_y_edge[0] - Q_y_i_vals[-1]
@@ -697,9 +707,11 @@ def grid_search_deriv_approx_vector(y_i:float,
                                     base_quantile_dist=base_quantile_dist) 
         
         
-        if y_i < Q_y_edge[0]:
-            bot_diff = 10 # Set to arbitrary big number
-        
+        if Q_y_edge[0] < -1e99:
+            print('erorr bottom no too large!!')
+        if y_i < Q_y_edge[0]:  # TODO Q_edge_0 = inf??
+            bot_diff = 1e300 # Set to arbitrary big number
+            #print('SSS!!')
         else:
             bot_diff = Q_y_i_vals[0] - Q_y_edge[0]
         if bot_diff == 0:
@@ -767,478 +779,6 @@ def eval_ll(y_vals_true,
     
     return log_lik
 
-
-def metropolis_step_kappa(kappa_current,
-                          mu_current,
-                          gamma_current,
-                           sigma_1_current,
-                           sigma_2_current,
-                           rho_current,
-                           lambda_current,
-                           knot_points,
-                           w_approx_current,
-                           w_X_current,
-                           tau_input,
-                           y_vals,
-                           x_vals):
-
-    # Sample new value for kappa
-    kappa_inv_sq_prop = gamma.rvs(a=3, scale=3)
-    kappa_prop = kappa_inv_sq_prop**(-1/2)
-
-    cov_mat_knots_prop = covariance_mat_single_var(knot_points,
-                             kappa=kappa_prop,
-                             rho=rho_current,
-                             lambd=lambda_current)
-
-    w_approx_prop = calc_knot_approx(tau_input,
-                                    np.arange(0.1,1,0.1),
-                                    cov_mat_knots_prop,
-                                    w_X_current,
-                                    kappa_prop,
-                                    rho_current,
-                                    lambda_current)
-    
-    # Calc likelihood
-    ll_prop = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=w_approx_prop[0:100],
-                        w_samples_2=w_approx_prop[100:200],
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_input,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-    
-    ll_curr = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=w_approx_current[0:100],
-                        w_samples_2=w_approx_current[100:200],
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_input,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-
-    # Take metropolis step
-    prior_lp_prop = gamma.logpdf(kappa_prop**(-1/2),  a=3, scale=3)
-    prior_lp_curr = gamma.logpdf(kappa_current**(-1/2),  a=3, scale=3)
-
-
-    a = np.exp(min(0, prior_lp_prop+ll_prop -\
-                prior_lp_curr+ll_curr))
-    
-    if np.random.uniform(0,1) < a: # accepted
-        return kappa_prop, 1
-    else: 
-        return kappa_current, 0
-
-
-def metropolis_step_kappa(kappa_current,
-                          mu_current,
-                          gamma_current,
-                           sigma_1_current,
-                           sigma_2_current,
-                           rho_current,
-                           lambda_current,
-                           knot_points,
-                           w_approx_current,
-                           w_X_current,
-                           tau_input,
-                           tau_grid,
-                           y_vals,
-                           x_vals):
-    
-    
-    # Sample new value for kappa
-    kappa_inv_sq_prop = gamma.rvs(a=3, scale=3)
-    kappa_prop = kappa_inv_sq_prop**(-1/2)
-
-    cov_mat_knots_prop = covariance_mat_single_var(knot_points,
-                             kappa=kappa_prop,
-                             rho=rho_current,
-                             lambd=lambda_current)
-
-    w_approx_prop = calc_knot_approx(tau_input,
-                                    np.arange(0.1,1,0.1),
-                                    cov_mat_knots_prop,
-                                    w_X_current,
-                                    kappa_prop,
-                                    rho_current,
-                                    lambda_current)
-    
-    # Calc likelihood
-    ll_prop = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_prop[0:100]),
-                        w_samples_2=np.real(w_approx_prop[100:200]),
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_grid,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-    
-    ll_curr = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_current[0:100]),
-                        w_samples_2=np.real(w_approx_current[100:200]),
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_grid,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-
-    # Take metropolis step
-    prior_lp_prop = gamma.logpdf(kappa_prop**(2),  a=3, scale=3)
-    prior_lp_curr = gamma.logpdf(kappa_current**(2),  a=3, scale=3)
-
-
-    a = np.exp(min(0, prior_lp_prop+ll_prop -\
-                prior_lp_curr+ll_curr))
-    
-    if np.random.uniform(0,1) < a: # accepted
-        return kappa_prop, 1
-    else: 
-        return kappa_current, 0
-
-
-
-
-def metropolis_step_lambda(kappa_current,
-                          mu_current,
-                          gamma_current,
-                           sigma_1_current,
-                           sigma_2_current,
-                           rho_current,
-                           lambda_current,
-                           knot_points,
-                           w_approx_current,
-                           w_X_current,
-                           tau_input,
-                           tau_grid,
-                           y_vals,
-                           x_vals):
-
-    # Sample new value for kappa
-    lambda_sq_prop = gamma.rvs(a=5, scale=10)
-    lambda_prop = np.sqrt(lambda_sq_prop)
-
-
-    cov_mat_knots_prop = covariance_mat_single_var(knot_points,
-                             kappa=kappa_current,
-                             rho=rho_current,
-                             lambd=lambda_prop)
-
-    w_approx_prop = calc_knot_approx(tau_input,
-                                    np.arange(0.1,1,0.1),
-                                    cov_mat_knots_prop,
-                                    w_X_current,
-                                    kappa_current,
-                                    rho_current,
-                                    lambda_prop)
-    
-    # Calc likelihood
-    ll_prop = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_prop[0:100]),
-                        w_samples_2=np.real(w_approx_prop[100:200]),
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_grid,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-    
-    ll_curr = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_current[0:100]),
-                        w_samples_2=np.real(w_approx_current[100:200]),
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_grid,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-
-    # Take metropolis step
-    prior_lp_prop = gamma.logpdf(lambda_prop**(2),  a=5, scale=10)
-    prior_lp_curr = gamma.logpdf(lambda_current**(2),  a=5, scale=10)
-
-
-    a = np.exp(min(0, prior_lp_prop+ll_prop -\
-                prior_lp_curr+ll_curr))
-    
-    if np.random.uniform(0,1) < a: # accepted
-        return lambda_prop, 1
-    else: 
-        return lambda_current, 0
-
-
-def metropolis_step_rho(kappa_current,
-                          mu_current,
-                          gamma_current,
-                           sigma_1_current,
-                           sigma_2_current,
-                           rho_current,
-                           lambda_current,
-                           knot_points,
-                           w_approx_current,
-                           w_X_current,
-                           tau_input,
-                           tau_grid,
-                           y_vals,
-                           x_vals):
-
-    # Sample new value for kappa
-    rho_prop = uniform.rvs(0,1)
-
-
-    cov_mat_knots_prop = covariance_mat_single_var(knot_points,
-                             kappa=kappa_current,
-                             rho=rho_prop,
-                             lambd=lambda_current)
-
-    w_approx_prop = calc_knot_approx(tau_input,
-                                    np.arange(0.1,1,0.1),
-                                    cov_mat_knots_prop,
-                                    w_X_current,
-                                    kappa_current,
-                                    rho_prop,
-                                    lambda_current)
-    
-    # Calc likelihood
-    ll_prop = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_prop[0:100]),
-                        w_samples_2=np.real(w_approx_prop[100:200]),
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_grid,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-    
-    ll_curr = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_current[0:100]),
-                        w_samples_2=np.real(w_approx_current[100:200]),
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_grid,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-
-    # Take metropolis step
-    prior_lp_prop = 1
-    prior_lp_curr = 1
-
-
-    a = np.exp(min(0, prior_lp_prop+ll_prop -\
-                prior_lp_curr+ll_curr))
-    
-    if np.random.uniform(0,1) < a: # accepted
-        return rho_prop, 1
-    else: 
-        return rho_current, 0
-
-
-
-def metropolis_step_sigmas(mu_current,
-                          gamma_current,
-                           sigma_1_current,
-                           sigma_2_current,
-                           w_approx_current,
-                           tau_grid,
-                           y_vals,
-                           x_vals):
-
-    # Sample new value for kappa
-    sigma_1_prop = gamma.rvs(a=2, scale=1/2)
-    sigma_2_prop = gamma.rvs(a=2, scale=1/2)
-
-    
-    # Calc likelihood
-    ll_prop = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_current[0:100]),
-                        w_samples_2=np.real(w_approx_current[100:200]),
-                        sigma_1=sigma_1_prop,
-                        sigma_2=sigma_2_prop,
-                        tau_grid=tau_grid,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-    
-    ll_curr = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_current[0:100]),
-                        w_samples_2=np.real(w_approx_current[100:200]),
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_grid,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-
-    # Take metropolis step
-    prior_lp_prop = gamma.logpdf(sigma_1_prop, a=2, scale=1/2) + gamma.logpdf(sigma_2_prop, a=2, scale=1/2) 
-    prior_lp_curr = gamma.logpdf(sigma_1_current, a=2, scale=1/2) + gamma.logpdf(sigma_2_current, a=2, scale=1/2) 
-
-
-    a = np.exp(min(0, prior_lp_prop+ll_prop -\
-                prior_lp_curr+ll_curr))
-    
-    if np.random.uniform(0,1) < a: # accepted
-        return sigma_1_prop, sigma_2_prop,  1
-    else: 
-        return sigma_1_current, sigma_2_current, 0
-    
-
-def metropolis_step_mu(mu_current,
-                          gamma_current,
-                           sigma_1_current,
-                           sigma_2_current,
-                           w_approx_current,
-                           tau_grid,
-                           y_vals,
-                           x_vals):
-
-    # Sample new value for kappa
-    mu_prop = norm.rvs(0,1)
-
-    
-    # Calc likelihood
-    ll_prop = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_current[0:100]),
-                        w_samples_2=np.real(w_approx_current[100:200]),
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_grid,
-                        mu=mu_prop,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-    
-    ll_curr = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_current[0:100]),
-                        w_samples_2=np.real(w_approx_current[100:200]),
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_grid,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-
-    # Take metropolis step
-    prior_lp_prop = norm.logpdf(mu_prop, 0,1)
-    prior_lp_curr = norm.logpdf(mu_current, 0,1)
-
-
-    a = np.exp(min(0, prior_lp_prop+ll_prop -\
-                prior_lp_curr+ll_curr))
-    
-    if np.random.uniform(0,1) < a: # accepted
-        return mu_prop,  1
-    else: 
-        return mu_current, 0
-    
-
-def metropolis_step_gamma(mu_current,
-                          gamma_current,
-                           sigma_1_current,
-                           sigma_2_current,
-                           w_approx_current,
-                           tau_grid,
-                           y_vals,
-                           x_vals):
-
-    # Sample new value for kappa from proposal
-    gamma_prop = norm.rvs(0,1)
-
-    
-    # Calc likelihood
-    ll_prop = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_current[0:100]),
-                        w_samples_2=np.real(w_approx_current[100:200]),
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_grid,
-                        mu=mu_current,
-                        gamma=gamma_prop,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-    
-    ll_curr = eval_ll(y_vals,
-                        x_vals,
-                        w_samples_1=np.real(w_approx_current[0:100]),
-                        w_samples_2=np.real(w_approx_current[100:200]),
-                        sigma_1=sigma_1_current,
-                        sigma_2=sigma_2_current,
-                        tau_grid=tau_grid,
-                        mu=mu_current,
-                        gamma=gamma_current,
-                        base_quantile_mean=0.0,
-                        base_quantile_sd=1.0,
-                        base_quantile_v=1,
-                        base_quantile_dist='norm')
-
-    # Take metropolis step
-    prior_lp_prop = norm.logpdf(gamma_prop, 0,1)
-    prior_lp_curr = norm.logpdf(gamma_current, 0,1)
-
-
-    a = np.exp(min(0, prior_lp_prop+ll_prop -\
-                prior_lp_curr+ll_curr))
-    
-    if np.random.uniform(0,1) < a: # accepted
-        return gamma_prop,  1
-    else: 
-        return gamma_current, 0
     
 
 def generate_beta_samples(tau_input: float,
@@ -1255,8 +795,8 @@ def generate_beta_samples(tau_input: float,
     for i in range(0,len(w_approx_store)):
 
         w_samp = w_approx_store[i]
-        w1_samp = w_samp[0:100]
-        w2_samp = w_samp[100:200]
+        w1_samp = w_samp[0:103]
+        w2_samp = w_samp[103:]
 
         mu_samp = mu_store[i]
         gamma_samp = gamma_store[i]
